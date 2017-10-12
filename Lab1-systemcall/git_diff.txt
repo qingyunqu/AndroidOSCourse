@@ -1,0 +1,88 @@
+diff --git a/arch/x86/syscalls/syscall_64.tbl b/arch/x86/syscalls/syscall_64.tbl
+index a3c38bb..c6b1de2 100644
+--- a/arch/x86/syscalls/syscall_64.tbl
++++ b/arch/x86/syscalls/syscall_64.tbl
+@@ -324,6 +324,8 @@
+ # 315	common	sched_getattr		sys_sched_getattr
+ # 316	common	renameat2		sys_renameat2
+ 317	common	seccomp			sys_seccomp
++318     64      setcolors               sys_setcolors
++319     64      getcolors               sys_getcolors
+ 
+ #
+ # x32-specific system call numbers start at 512 to avoid cache impact
+diff --git a/drivers/android/binder.c b/drivers/android/binder.c
+index 383aa21..02b34c1 100644
+--- a/drivers/android/binder.c
++++ b/drivers/android/binder.c
+@@ -1405,6 +1405,12 @@ static void binder_transaction(struct binder_proc *proc,
+ 			return_error = BR_DEAD_REPLY;
+ 			goto err_dead_binder;
+ 		}
++//my binder_judge
++		if((proc->tsk->color!=0)&&(target_proc->tsk->color!=0)&&(proc->tsk->color!=target_proc->tsk->color)){
++			return_error=BR_DEAD_REPLY;		
++			goto err_dead_binder;
++	}
++
+ 		if (security_binder_transaction(proc->tsk, target_proc->tsk) < 0) {
+ 			return_error = BR_FAILED_REPLY;
+ 			goto err_invalid_target_handle;
+diff --git a/include/linux/sched.h b/include/linux/sched.h
+index 0ae16dd..357cd4a 100644
+--- a/include/linux/sched.h
++++ b/include/linux/sched.h
+@@ -1033,6 +1033,7 @@ enum perf_event_task_context {
+ };
+ 
+ struct task_struct {
++	u_int16_t color; /* Process's color */
+ 	volatile long state;	/* -1 unrunnable, 0 runnable, >0 stopped */
+ 	void *stack;
+ 	atomic_t usage;
+diff --git a/include/linux/syscalls.h b/include/linux/syscalls.h
+index 2a955dc..00de918 100644
+--- a/include/linux/syscalls.h
++++ b/include/linux/syscalls.h
+@@ -843,4 +843,6 @@ asmlinkage long sys_kcmp(pid_t pid1, pid_t pid2, int type,
+ asmlinkage long sys_finit_module(int fd, const char __user *uargs, int flags);
+ asmlinkage long sys_seccomp(unsigned int op, unsigned int flags,
+ 			    const char __user *uargs);
++asmlinkage long sys_setcolors(int nr_pids, pid_t *pids, u_int16_t *colors, int *retval);
++asmlinkage long sys_getcolors(int nr_pids, pid_t *pids, u_int16_t *colors, int *retval);
+ #endif
+diff --git a/kernel/Makefile b/kernel/Makefile
+index 271fd31..1bf1faa 100644
+--- a/kernel/Makefile
++++ b/kernel/Makefile
+@@ -2,7 +2,7 @@
+ # Makefile for the linux kernel.
+ #
+ 
+-obj-y     = fork.o exec_domain.o panic.o printk.o \
++obj-y     = fork.o exec_domain.o panic.o printk.o color.o \
+ 	    cpu.o exit.o itimer.o time.o softirq.o resource.o \
+ 	    sysctl.o sysctl_binary.o capability.o ptrace.o timer.o user.o \
+ 	    signal.o sys.o kmod.o workqueue.o pid.o task_work.o \
+diff --git a/kernel/fork.c b/kernel/fork.c
+index 52bde0c..af6b6f6 100644
+--- a/kernel/fork.c
++++ b/kernel/fork.c
+@@ -1284,6 +1284,17 @@ static struct task_struct *copy_process(unsigned long clone_flags,
+ 	if (!try_module_get(task_thread_info(p)->exec_domain->module))
+ 		goto bad_fork_cleanup_count;
+ 
++//my fork_color
++	if(clone_flags&CLONE_VFORK)  /*init the color*/
++	{
++		p->color=0;
++	}
++	else
++	{
++		p->color=p->parent->color;
++	}
++
++
+ 	p->did_exec = 0;
+ 	delayacct_tsk_init(p);	/* Must remain after dup_task_struct() */
+ 	copy_flags(clone_flags, p);

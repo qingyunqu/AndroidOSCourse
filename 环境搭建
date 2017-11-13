@@ -1,0 +1,50 @@
+# 推荐使用双系统搭建编译和运行环境，虚拟机性能可能会比较差
+
+############# 方法一：使用git从网上下载源码(推荐）#################
+
+# 我们不下载编译AOSP的源码，而是直接提供编译好的与Kernel版本匹配的img文件(step 3)
+# img文件可以从我们的ftp服务器上下载：ftp://162.105.174.241，账号密码都是OSCourse
+# 如果要使用自己编译的img，请务必确保版本正确
+
+# Step 1: Make a folder for our course
+mkdir AndroidCourse
+cd AndroidCourse
+
+# Step 2: Download emulator and cross-compiler tool
+git clone https://aosp.tuna.tsinghua.edu.cn/platform/prebuilts/gcc/linux-x86/x86/x86_64-linux-android-4.9
+git clone https://aosp.tuna.tsinghua.edu.cn/platform/prebuilts/android-emulator
+
+# Step 3: Download three imgs from ftp server and put them under ./AndroidCourse/imgs
+
+# Step 4: Download Kernel source
+git clone https://aosp.tuna.tsinghua.edu.cn/kernel/goldfish.git
+cd goldfish
+git checkout android-goldfish-3.10-m-dev
+
+# Step 5: Build the kernel
+export ARCH=x86_64 CROSS_COMPILE=../x86_64-linux-android-4.9/bin/x86_64-linux-android-
+make ARCH=x86_64 x86_64_emu_defconfig
+make CC="${CROSS_COMPILE}gcc -mno-android" bzImage -j8
+
+# Step 6: Run emulator
+cd ..
+./android-emulator/linux-x86_64/emulator64-x86 -kernel ./goldfish/arch/x86_64/boot/bzImage -system ./imgs/system.img -ramdisk ./imgs/ramdisk.img -data ./imgs/userdata.img -sysdir ./imgs/ -show-kernel -verbose -memory 1024
+
+
+############# 方法二：从ftp服务器上下载所有源码 #################
+服务器地址：ftp://162.105.174.241，账号密码都是OSCourse
+下载所有除了imgs以外的目录，将imgs-new重命名为imgs
+进行方法一中的Step 5和Step 6
+
+
+
+
+
+
+———————————————————————————————————————————
+
+QA
+
+1)libQt5报错
+export LD_LIBRARY_PATH=./android-emulator/linux-x86_64/lib64/qt/lib
+2)在Lab3中，在挂载SD卡时，若内核提示SELinux未验证，那么我们需要重新在config中，将File systems里的Ext2 extended attributes里的security xattr选上并重新编译，方能解决此问题。

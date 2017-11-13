@@ -1,0 +1,8 @@
+MAP_PRIVATE和MAP_SHARED的区别（可以尝试阅读源码）
+vma的合并问题
+用户测试程序ＰＶ操作
+page(s)的问题（需要修改的地方很多）
+方案一：
+	局限性，一个vma只能有一页，涉及的函数：ssmem_init,ssmem_attach,ssmem_detach，用户空间函数
+方案二：
+	没解决一个vma只能有一页的问题

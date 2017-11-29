@@ -1,0 +1,185 @@
+diff --git a/arch/x86/syscalls/syscall_64.tbl b/arch/x86/syscalls/syscall_64.tbl
+index 9299f62..72b921d 100644
+--- a/arch/x86/syscalls/syscall_64.tbl
++++ b/arch/x86/syscalls/syscall_64.tbl
+@@ -328,7 +328,9 @@
+ 319     64      getcolors               sys_getcolors
+ 320     64      ssmem_attach            sys_ssmem_attach
+ 321     64      ssmem_detach            sys_ssmem_detach
+-
++322	64	net_lock		sys_net_lock
++323	64	net_unlock		sys_net_unlock
++324	64	net_lock_wait_timeout	sys_net_lock_wait_timeout
+ #
+ # x32-specific system call numbers start at 512 to avoid cache impact
+ # for native 64-bit operation.
+diff --git a/include/linux/sched.h b/include/linux/sched.h
+index 357cd4a..21f4f20 100644
+--- a/include/linux/sched.h
++++ b/include/linux/sched.h
+@@ -1022,6 +1022,13 @@ struct sched_rt_entity {
+ #endif
+ };
+ 
++struct task_struct;
++
++struct sched_edf_entity {
++	struct list_head run_list;
++	unsigned long deadline;    //delay on jiffies (jiffies+waittime) 
++	struct task_struct *p;
++};
+ 
+ struct rcu_node;
+ 
+@@ -1051,6 +1058,8 @@ struct task_struct {
+ 	const struct sched_class *sched_class;
+ 	struct sched_entity se;
+ 	struct sched_rt_entity rt;
++	struct sched_edf_entity edf;
++
+ #ifdef CONFIG_CGROUP_SCHED
+ 	struct task_group *sched_task_group;
+ #endif
+diff --git a/include/linux/syscalls.h b/include/linux/syscalls.h
+index aa78b09..832c8a8 100644
+--- a/include/linux/syscalls.h
++++ b/include/linux/syscalls.h
+@@ -65,6 +65,8 @@ struct perf_event_attr;
+ struct file_handle;
+ struct sigaltstack;
+ 
++
++
+ #include <linux/types.h>
+ #include <linux/aio_abi.h>
+ #include <linux/capability.h>
+@@ -847,4 +849,11 @@ asmlinkage long sys_setcolors(int nr_pids, pid_t *pids, u_int16_t *colors, int *
+ asmlinkage long sys_getcolors(int nr_pids, pid_t *pids, u_int16_t *colors, int *retval);
+ asmlinkage long sys_ssmem_attach(int id,int flags,size_t length);
+ asmlinkage long sys_ssmem_detach(void *addr);
++
++enum __netlock_t;
++typedef enum __netlock_t netlock_t;
++
++asmlinkage long sys_net_lock(netlock_t type,u_int16_t timeout_val);
++asmlinkage long sys_net_unlock(netlock_t type);
++asmlinkage long sys_net_lock_wait_timeout(void);
+ #endif
+diff --git a/include/uapi/linux/sched.h b/include/uapi/linux/sched.h
+index 5a0f945..090651f 100644
+--- a/include/uapi/linux/sched.h
++++ b/include/uapi/linux/sched.h
+@@ -39,6 +39,7 @@
+ #define SCHED_BATCH		3
+ /* SCHED_ISO: reserved but not implemented yet */
+ #define SCHED_IDLE		5
++#define SCHED_EDF		6
+ /* Can be ORed in to make sure the process is reverted back to SCHED_NORMAL on fork */
+ #define SCHED_RESET_ON_FORK     0x40000000
+ 
+diff --git a/kernel/Makefile b/kernel/Makefile
+index 1bf1faa..298f83a 100644
+--- a/kernel/Makefile
++++ b/kernel/Makefile
+@@ -2,7 +2,7 @@
+ # Makefile for the linux kernel.
+ #
+ 
+-obj-y     = fork.o exec_domain.o panic.o printk.o color.o \
++obj-y     = fork.o exec_domain.o panic.o printk.o color.o netlock.o \
+ 	    cpu.o exit.o itimer.o time.o softirq.o resource.o \
+ 	    sysctl.o sysctl_binary.o capability.o ptrace.o timer.o user.o \
+ 	    signal.o sys.o kmod.o workqueue.o pid.o task_work.o \
+diff --git a/kernel/sched/Makefile b/kernel/sched/Makefile
+index deaf90e..ef99e0d 100644
+--- a/kernel/sched/Makefile
++++ b/kernel/sched/Makefile
+@@ -11,7 +11,7 @@ ifneq ($(CONFIG_SCHED_OMIT_FRAME_POINTER),y)
+ CFLAGS_core.o := $(PROFILING) -fno-omit-frame-pointer
+ endif
+ 
+-obj-y += core.o clock.o cputime.o idle_task.o fair.o rt.o stop_task.o
++obj-y += core.o clock.o cputime.o idle_task.o fair.o rt.o stop_task.o edf.o
+ obj-$(CONFIG_SMP) += cpupri.o
+ obj-$(CONFIG_SCHED_AUTOGROUP) += auto_group.o
+ obj-$(CONFIG_SCHEDSTATS) += stats.o
+diff --git a/kernel/sched/core.c b/kernel/sched/core.c
+index d5c5c98..852bf87 100644
+--- a/kernel/sched/core.c
++++ b/kernel/sched/core.c
+@@ -3867,7 +3867,7 @@ recheck:
+ 
+ 		if (policy != SCHED_FIFO && policy != SCHED_RR &&
+ 				policy != SCHED_NORMAL && policy != SCHED_BATCH &&
+-				policy != SCHED_IDLE)
++				policy != SCHED_IDLE && policy != SCHED_EDF)
+ 			return -EINVAL;
+ 	}
+ 
+@@ -6907,6 +6907,8 @@ LIST_HEAD(task_groups);
+ 
+ DECLARE_PER_CPU(cpumask_var_t, load_balance_mask);
+ 
++extern void init_edf_rq(struct edf_rq *edf);
++
+ void __init sched_init(void)
+ {
+ 	int i, j;
+@@ -6978,6 +6980,7 @@ void __init sched_init(void)
+ 		rq->calc_load_update = jiffies + LOAD_FREQ;
+ 		init_cfs_rq(&rq->cfs);
+ 		init_rt_rq(&rq->rt, rq);
++		init_edf_rq(&rq->edf);
+ #ifdef CONFIG_FAIR_GROUP_SCHED
+ 		root_task_group.shares = ROOT_TASK_GROUP_LOAD;
+ 		INIT_LIST_HEAD(&rq->leaf_cfs_rq_list);
+diff --git a/kernel/sched/rt.c b/kernel/sched/rt.c
+index 127a2c4..c73238c 100644
+--- a/kernel/sched/rt.c
++++ b/kernel/sched/rt.c
+@@ -2055,7 +2055,7 @@ static unsigned int get_rr_interval_rt(struct rq *rq, struct task_struct *task)
+ }
+ 
+ const struct sched_class rt_sched_class = {
+-	.next			= &fair_sched_class,
++	.next			= &edf_sched_class,
+ 	.enqueue_task		= enqueue_task_rt,
+ 	.dequeue_task		= dequeue_task_rt,
+ 	.yield_task		= yield_task_rt,
+diff --git a/kernel/sched/sched.h b/kernel/sched/sched.h
+index ce39224d..fae96c6 100644
+--- a/kernel/sched/sched.h
++++ b/kernel/sched/sched.h
+@@ -358,6 +358,15 @@ struct rt_rq {
+ #endif
+ };
+ 
++//edf
++struct edf_rq {
++	struct list_head head;
++	unsigned long edf_nr_running;
++	//struct sched_edf_entity *curr;
++	unsigned long nearest;   //the nearest deadline,also delay on jiffies 
++};
++
++
+ #ifdef CONFIG_SMP
+ 
+ /*
+@@ -422,6 +431,7 @@ struct rq {
+ 
+ 	struct cfs_rq cfs;
+ 	struct rt_rq rt;
++	struct edf_rq edf;
+ 
+ #ifdef CONFIG_FAIR_GROUP_SCHED
+ 	/* list of leaf cfs_rq on this cpu: */
+@@ -1019,7 +1029,7 @@ extern const struct sched_class stop_sched_class;
+ extern const struct sched_class rt_sched_class;
+ extern const struct sched_class fair_sched_class;
+ extern const struct sched_class idle_sched_class;
+-
++extern const struct sched_class edf_sched_class;
+ 
+ #ifdef CONFIG_SMP
+ 

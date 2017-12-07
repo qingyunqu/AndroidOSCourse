@@ -23,7 +23,7 @@ git checkout android-goldfish-3.10-m-dev
 
 # Step 5: Build the kernel
 export ARCH=x86_64 CROSS_COMPILE=../x86_64-linux-android-4.9/bin/x86_64-linux-android-
-make ARCH=x86_64 x86_64_emu_defconfig
+make x86_64_emu_defconfig
 make CC="${CROSS_COMPILE}gcc -mno-android" bzImage -j8
 
 # Step 6: Run emulator

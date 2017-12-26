@@ -1,0 +1,68 @@
+[   30.521792] evictd begin!
+[   30.521844] evictd sleep!
+[   45.666048] evictd begin!
+[   45.666147] evictd sleep!
+[   60.810177] evictd begin!
+[   60.810266] evictd sleep!
+[   61.476592] healthd: battery l=50 v=0 t=0.0 h=2 st=2 chg=a
+[   63.716711] the low_watermark is : 0
+[   63.716769] the evcit_target is : 0
+[   63.717106] EXT2-fs (mmcblk0p1): warning: mounting unchecked fs, running e2fsck is recommended
+[   71.906789] type=1400 audit(1514313453.705:12): avc: denied { unmount } for pid=3077 comm="main" scontext=u:r:zygote:s0 tcontext=u:object_r:labeledfs:s0 tclass=filesystem permissive=1
+[   75.954702] evictd begin!
+[   75.954799] ext2_evict_fs!
+[   75.954854] ext2_get_usage : 3
+[   75.954902] clock_hand!
+[   75.954963] inode ffff88002fd88608, ino 11
+[   75.955070] ext2_judge_evict!
+[   75.955120] inode : 11 is a dir
+[   75.955169] inode ffff88002fd88350, ino 12
+[   75.955214] ext2_judge_evict!
+[   75.955277] ext2_evict!
+[   75.955431] clfs_put!
+[   75.957247] connect to server success
+[   75.959158] read 12 bytes from file
+[   75.959711] type=1400 audit(1514313457.755:13): avc: denied { create } for pid=341 comm="kfs_evictd" scontext=u:r:kernel:s0 tcontext=u:r:kernel:s0 tclass=tcp_socket permissive=1
+[   75.959874] type=1400 audit(1514313457.755:14): avc: denied { net_raw } for pid=341 comm="kfs_evictd" capability=13 scontext=u:r:kernel:s0 tcontext=u:r:kernel:s0 tclass=capability permissive=1
+[   75.959951] type=1400 audit(1514313457.755:15): avc: denied { name_connect } for pid=341 comm="kfs_evictd" dest=8888 scontext=u:r:kernel:s0 tcontext=u:object_r:port:s0 tclass=tcp_socket permissive=1
+[   75.960155] rm_diskfile!
+[   75.960716] inode ffff88002fd888c0, ino 1281
+[   75.960745] ext2_judge_evict!
+[   75.960770] inode : 1281 is a dir
+[   75.960794] inode ffff88002fd88b78, ino 1282
+[   75.960815] ext2_judge_evict!
+[   75.960836] ext2_evict!
+[   75.960857] inode : 1282 's size = 0 
+[   75.972407] type=1400 audit(1514313457.755:16): avc: denied { search } for pid=341 comm="kfs_evictd" name="default" dev="tmpfs" ino=3200 scontext=u:r:kernel:s0 tcontext=u:object_r:storage_file:s0 tclass=dir permissive=1
+[   75.972488] type=1400 audit(1514313457.755:17): avc: denied { read } for pid=341 comm="kfs_evictd" name="primary" dev="tmpfs" ino=3207 scontext=u:r:kernel:s0 tcontext=u:object_r:storage_file:s0 tclass=lnk_file permissive=1
+[   75.972549] type=1400 audit(1514313457.755:18): avc: denied { search } for pid=341 comm="kfs_evictd" name="user" dev="tmpfs" ino=3195 scontext=u:r:kernel:s0 tcontext=u:object_r:mnt_user_file:s0 tclass=dir permissive=1
+[   75.972603] type=1400 audit(1514313457.755:19): avc: denied { read } for pid=341 comm="kfs_evictd" name="primary" dev="tmpfs" ino=8236 scontext=u:r:kernel:s0 tcontext=u:object_r:mnt_user_file:s0 tclass=lnk_file permissive=1
+[   75.972666] type=1400 audit(1514313457.755:20): avc: denied { search } for pid=341 comm="kfs_evictd" name="/" dev="fuse" ino=0 scontext=u:r:kernel:s0 tcontext=u:object_r:fuse:s0 tclass=dir permissive=1
+[   75.972738] type=1400 audit(1514313457.755:21): avc: denied { read } for pid=341 comm="kfs_evictd" name="s.txt" dev="mmcblk0p1" ino=12 scontext=u:r:kernel:s0 tcontext=u:object_r:storage_file:s0 tclass=file permissive=1
+[   75.972785] type=1400 audit(1514313457.755:22): avc: denied { open } for pid=341 comm="kfs_evictd" path="/storage/emulated/0/s.txt" dev="mmcblk0p1" ino=12 scontext=u:r:kernel:s0 tcontext=u:object_r:storage_file:s0 tclass=file permissive=1
+[   75.972832] type=1400 audit(1514313457.755:23): avc: denied { write } for pid=341 comm="kfs_evictd" name="s.txt" dev="mmcblk0p1" ino=12 scontext=u:r:kernel:s0 tcontext=u:object_r:storage_file:s0 tclass=file permissive=1
+[   75.976899] evictd sleep!
+[   91.118331] evictd begin!
+[   91.118407] ext2_evict_fs!
+[   91.118452] ext2_get_usage : 3
+[   91.118491] clock_hand!
+[   91.118534] inode ffff88002fd88608, ino 11
+[   91.118663] ext2_judge_evict!
+[   91.118726] inode : 11 is a dir
+[   91.118776] inode ffff88002fd88350, ino 12
+[   91.118823] ext2_judge_evict!
+[   91.118870] ext2_evict!
+[   91.118934] clfs_put!
+[   91.119932] type=1400 audit(1514313472.925:24): avc: denied { net_raw } for pid=341 comm="kfs_evictd" capability=13 scontext=u:r:kernel:s0 tcontext=u:r:kernel:s0 tclass=capability permissive=1
+[   91.120954] connect to server success
+[   91.122931] read 12 bytes from file
+[   91.124292] rm_diskfile!
+[   91.124423] inode ffff88002fd888c0, ino 1281
+[   91.124482] ext2_judge_evict!
+[   91.124530] inode : 1281 is a dir
+[   91.124578] inode ffff88002fd88b78, ino 1282
+[   91.124625] ext2_judge_evict!
+[   91.124673] ext2_evict!
+[   91.124719] inode : 1282 's size = 0 
+[   91.126924] evictd sleep!
+

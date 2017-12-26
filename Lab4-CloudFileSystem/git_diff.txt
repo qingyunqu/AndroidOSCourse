@@ -1,0 +1,305 @@
+diff --git a/fs/Makefile b/fs/Makefile
+index 4fe6df3..9e7eb16 100644
+--- a/fs/Makefile
++++ b/fs/Makefile
+@@ -5,7 +5,7 @@
+ # Rewritten to use lists instead of if-statements.
+ # 
+ 
+-obj-y :=	open.o read_write.o file_table.o super.o \
++obj-y :=	open.o read_write.o file_table.o super.o evictd.o \
+ 		char_dev.o stat.o exec.o pipe.o namei.o fcntl.o \
+ 		ioctl.o readdir.o select.o dcache.o inode.o \
+ 		attr.o bad_inode.o file.o filesystems.o namespace.o \
+diff --git a/fs/ext2/Makefile b/fs/ext2/Makefile
+index f42af45..c17c2af 100644
+--- a/fs/ext2/Makefile
++++ b/fs/ext2/Makefile
+@@ -4,7 +4,7 @@
+ 
+ obj-$(CONFIG_EXT2_FS) += ext2.o
+ 
+-ext2-y := balloc.o dir.o file.o ialloc.o inode.o \
++ext2-y := balloc.o dir.o file.o ialloc.o inode.o ext2_evicted.o \
+ 	  ioctl.o namei.o super.o symlink.o
+ 
+ ext2-$(CONFIG_EXT2_FS_XATTR)	 += xattr.o xattr_user.o xattr_trusted.o
+diff --git a/fs/ext2/dir.c b/fs/ext2/dir.c
+index 4237722bf..4479b2c 100644
+--- a/fs/ext2/dir.c
++++ b/fs/ext2/dir.c
+@@ -731,3 +731,64 @@ const struct file_operations ext2_dir_operations = {
+ #endif
+ 	.fsync		= ext2_fsync,
+ };
++struct ext2_dir_entry_2 *ext2_find_entry_ino (struct inode * dir,
++			ino_t ino, struct page ** res_page)
++{
++	unsigned long start, n;
++	unsigned long npages = dir_pages(dir);
++	struct page *page = NULL;
++	struct ext2_inode_info *ei = EXT2_I(dir);
++	ext2_dirent * de;
++	int dir_has_error = 0;
++
++	if (npages == 0)
++		goto out;
++
++	/* OFFSET_CACHE */
++	*res_page = NULL;
++
++	start = ei->i_dir_start_lookup;
++	if (start >= npages)
++		start = 0;
++	n = start;
++	do {
++		char *kaddr;
++		page = ext2_get_page(dir, n, dir_has_error);
++	if (!IS_ERR(page)) {
++			kaddr = page_address(page);
++		de = (ext2_dirent *) kaddr;
++			kaddr += ext2_last_byte(dir, n);
++			while ((char *) de <= kaddr) {
++				if (de->rec_len == 0) {
++					ext2_error(dir->i_sb, __func__,
++						"zero-length directory entry");
++					ext2_put_page(page);
++					goto out;
++				}
++				if (de->inode == ino)
++					goto found;
++				de = ext2_next_entry(de);
++			}
++			ext2_put_page(page);
++		} else
++			dir_has_error = 1;
++
++		if (++n >= npages)
++			n = 0;
++		/* next page is past the blocks we've got */
++		if (unlikely(n > (dir->i_blocks >> (PAGE_CACHE_SHIFT - 9)))) {
++			ext2_error(dir->i_sb, __func__,
++				"dir %lu size %lld exceeds block count %llu",
++				dir->i_ino, dir->i_size,
++				(unsigned long long)dir->i_blocks);
++			goto out;
++		}
++	} while (n != start);
++out:
++	return NULL;
++
++found:
++	*res_page = page;
++	ei->i_dir_start_lookup = n;
++	return de;
++}
+diff --git a/fs/ext2/ext2.h b/fs/ext2/ext2.h
+index d9a17d0..1b1a076 100644
+--- a/fs/ext2/ext2.h
++++ b/fs/ext2/ext2.h
+@@ -772,6 +772,7 @@ extern __printf(3, 4)
+ void ext2_msg(struct super_block *, const char *, const char *, ...);
+ extern void ext2_update_dynamic_rev (struct super_block *sb);
+ extern void ext2_write_super (struct super_block *);
++extern int ext2_evict_fs(struct super_block *super);
+ 
+ /*
+  * Inodes and files operations
+diff --git a/fs/ext2/file.c b/fs/ext2/file.c
+index a5b3a5d..4d4e444 100644
+--- a/fs/ext2/file.c
++++ b/fs/ext2/file.c
+@@ -60,6 +60,15 @@ int ext2_fsync(struct file *file, loff_t start, loff_t end, int datasync)
+  * We have mostly NULL's here: the current defaults are ok for
+  * the ext2 filesystem.
+  */
++extern int inode_evicted(struct inode *inode);
++extern int ext2_fetch(struct inode *inode);
++static int do_ext2_openfile(struct inode *inode, struct file *file)
++{
++	if(inode_evicted(inode)){
++		ext2_fetch(inode);
++	}
++	return dquot_file_open(inode,file);
++}
+ const struct file_operations ext2_file_operations = {
+ 	.llseek		= generic_file_llseek,
+ 	.read		= do_sync_read,
+@@ -71,7 +80,7 @@ const struct file_operations ext2_file_operations = {
+ 	.compat_ioctl	= ext2_compat_ioctl,
+ #endif
+ 	.mmap		= generic_file_mmap,
+-	.open		= dquot_file_open,
++	.open		= do_ext2_openfile,
+ 	.release	= ext2_release_file,
+ 	.fsync		= ext2_fsync,
+ 	.splice_read	= generic_file_splice_read,
+diff --git a/fs/ext2/ialloc.c b/fs/ext2/ialloc.c
+index 7cadd82..23d4af0 100644
+--- a/fs/ext2/ialloc.c
++++ b/fs/ext2/ialloc.c
+@@ -672,4 +672,60 @@ unsigned long ext2_count_dirs (struct super_block * sb)
+ 	}
+ 	return count;
+ }
++void for_each_inode(
++	struct super_block *super, void (*fun)(struct inode*, void*), void *arg)
++{
++	// - how to iterate over the fs ?
++    // - maybe the combine of read_inode_bitmap and ext2_iget works
++	struct ext2_sb_info *sbi = EXT2_SB(super);
++	struct ext2_super_block *es = sbi->s_es;
++	struct buffer_head *bh;
++
++    int group_count = sbi->s_groups_count; // ?
++    int i = 0;
++
++    for (; i < group_count; ++i)
++    {
++        int j = 0;
++        bh = read_inode_bitmap(super, i);
++
++        for (; j < bh->b_size; ++j)
++        {
++	        struct inode *inode;
++            unsigned char x = *((unsigned char*)bh->b_data + j);
++            int k = 0;
++            int ino = (j << 3) + 1;
++			unsigned char mask = 0x1;
++
++			//printk("bitmap: %x base: %d\n", x, ino);
++
++			for (; k < 8; ++k, ++ino, mask <<= 1)
++			{
++				if (unlikely(ino <= 10))
++				{
++					continue;
++				}
++				if (unlikely(ino > es->s_inodes_count))
++				{
++					brelse(bh);
++					goto out;
++				}
++				if (x & mask)
++				{
++					inode = ext2_iget(super, ino);
++					if (!IS_ERR(inode) && (inode != NULL))
++					{
++						printk("inode %lx, ino %d\n", (unsigned long)inode, ino);
++						fun(inode, arg);
++						iput(inode);
++					}
++				}
++			}
++        }
++		brelse(bh);
++    }
++out:
++	return;
++}
++EXPORT_SYMBOL(for_each_inode);
+ 
+diff --git a/fs/ext2/super.c b/fs/ext2/super.c
+index bc47f47..5eff2b0 100644
+--- a/fs/ext2/super.c
++++ b/fs/ext2/super.c
+@@ -317,6 +317,8 @@ static const struct super_operations ext2_sops = {
+ 	.statfs		= ext2_statfs,
+ 	.remount_fs	= ext2_remount,
+ 	.show_options	= ext2_show_options,
++
++	.evict_fs	= ext2_evict_fs,
+ #ifdef CONFIG_QUOTA
+ 	.quota_read	= ext2_quota_read,
+ 	.quota_write	= ext2_quota_write,
+@@ -390,7 +392,7 @@ static unsigned long get_sb_block(void **data)
+ }
+ 
+ enum {
+-	Opt_bsd_df, Opt_minix_df, Opt_grpid, Opt_nogrpid,
++	Opt_srv,Opt_wh,Opt_wl,Opt_evict,Opt_bsd_df, Opt_minix_df, Opt_grpid, Opt_nogrpid,
+ 	Opt_resgid, Opt_resuid, Opt_sb, Opt_err_cont, Opt_err_panic,
+ 	Opt_err_ro, Opt_nouid32, Opt_nocheck, Opt_debug,
+ 	Opt_oldalloc, Opt_orlov, Opt_nobh, Opt_user_xattr, Opt_nouser_xattr,
+@@ -399,6 +401,10 @@ enum {
+ };
+ 
+ static const match_table_t tokens = {
++	{Opt_srv, "srv=%u.%u.%u.%u:%u"},
++	{Opt_wh, "wh=%u"},
++	{Opt_wl, "wl=%u"},
++	{Opt_evict, "evict=%u"},
+ 	{Opt_bsd_df, "bsddf"},
+ 	{Opt_minix_df, "minixdf"},
+ 	{Opt_grpid, "grpid"},
+@@ -431,9 +437,10 @@ static const match_table_t tokens = {
+ 	{Opt_noreservation, "noreservation"},
+ 	{Opt_err, NULL}
+ };
+-
++extern int clfs_parse_options(char *p);
+ static int parse_options(char *options, struct super_block *sb)
+ {
++	//printk("options : %s\n",options);	
+ 	char *p;
+ 	struct ext2_sb_info *sbi = EXT2_SB(sb);
+ 	substring_t args[MAX_OPT_ARGS];
+@@ -450,7 +457,17 @@ static int parse_options(char *options, struct super_block *sb)
+ 			continue;
+ 
+ 		token = match_token(p, tokens, args);
++		//printk("p : %s\n",p);
++		//printk("args[0] : %u\n",args[0]);
+ 		switch (token) {
++		
++		case Opt_srv:
++		case Opt_wh:
++		case Opt_wl:
++		case Opt_evict:
++			clfs_parse_options(p);
++			break;
++
+ 		case Opt_bsd_df:
+ 			clear_opt (sbi->s_mount_opt, MINIX_DF);
+ 			break;
+diff --git a/include/linux/fs.h b/include/linux/fs.h
+index 9257703..738431d 100644
+--- a/include/linux/fs.h
++++ b/include/linux/fs.h
+@@ -1628,6 +1628,8 @@ struct super_operations {
+ 	int (*bdev_try_to_free_page)(struct super_block*, struct page*, gfp_t);
+ 	int (*nr_cached_objects)(struct super_block *);
+ 	void (*free_cached_objects)(struct super_block *, int);
++	
++	int (*evict_fs)(struct super_block *super);
+ };
+ 
+ /*
+diff --git a/security/selinux/selinuxfs.c b/security/selinux/selinuxfs.c
+index ff42773..02a7273 100644
+--- a/security/selinux/selinuxfs.c
++++ b/security/selinux/selinuxfs.c
+@@ -137,6 +137,23 @@ static ssize_t sel_read_enforce(struct file *filp, char __user *buf,
+ }
+ 
+ #ifdef CONFIG_SECURITY_SELINUX_DEVELOP
++ssize_t sel_write_enforce_val(int new_value)
++{
++	if (new_value != selinux_enforcing) {
++		audit_log(current->audit_context, GFP_KERNEL, AUDIT_MAC_STATUS,
++			"enforcing=%d old_enforcing=%d auid=%u ses=%u",
++			new_value, selinux_enforcing,
++			from_kuid(&init_user_ns, audit_get_loginuid(current)),
++			audit_get_sessionid(current));
++		selinux_enforcing = new_value;
++		if (selinux_enforcing)
++			avc_ss_reset(0);
++		selnl_notify_setenforce(selinux_enforcing);
++		selinux_status_update_setenforce(selinux_enforcing);
++	}
++	return 0;
++}
++EXPORT_SYMBOL(sel_write_enforce_val);
+ static ssize_t sel_write_enforce(struct file *file, const char __user *buf,
+ 				 size_t count, loff_t *ppos)
+ 
